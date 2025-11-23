@@ -1,0 +1,12 @@
+This is a sample text file for testing the IOCraft text editor.
+
+Features to test:
+- File loading
+- File saving
+- Text editing
+- Cursor movement
+- Line operations
+
+You can edit this content and save it back to see the file I/O functionality in action.
+
+Happy editing!

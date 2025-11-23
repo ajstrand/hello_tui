@@ -1,0 +1,8 @@
+Welcome to IOCraft Text Editor!
+This is a demonstration of file I/O capabilities.
+
+Features demonstrated:
+- Loading text files
+- Editing text content
+- Saving modified files
+- Cursor positioning
