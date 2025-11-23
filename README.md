@@ -21,6 +21,14 @@ A modern terminal-based text editor built in Rust with **Sublime Text-style cont
 - **IOCraft integration** - Stunning file browser and status displays
 - **Clean interface** - Modern, intuitive terminal experience
 - **Real-time cursor** - Visual feedback during editing
+- **Mouse support** - Full mouse navigation and text selection
+
+### 🖱️ **Advanced Mouse Controls**
+- **Click navigation** - Click anywhere to position cursor
+- **Text selection** - Drag to select with visual highlighting
+- **Word selection** - Double-click to select entire words
+- **Scroll navigation** - Mouse wheel scrolling through documents
+- **Context menus** - Right-click for available actions
 
 ### 🏗️ **Modular Architecture**
 - **Multiple editor variants** - Interactive, quick launcher, demo modes
@@ -61,7 +69,7 @@ cargo run --bin quick_editor
 cargo run --bin editor_demo
 ```
 
-## ⌨️ Keyboard Shortcuts
+## ⌨️ Controls
 
 ### File Operations
 - `Ctrl+S` - Save current file
@@ -70,17 +78,25 @@ cargo run --bin editor_demo
 - `Ctrl+Q` - Quit editor
 - `Ctrl+C` - Force quit
 
-### Editing
+### Text Editing
 - **Direct typing** - All characters insert immediately
 - `Enter` - Insert new line
-- `Backspace` - Delete character
-- `Arrow keys` - Move cursor
+- `Backspace` - Delete character before cursor
+- `Delete` - Delete character after cursor or selected text
 
 ### Navigation
+- `Arrow keys` - Move cursor
 - `Home` - Go to start of line
 - `End` - Go to end of line
 - `Ctrl+Home` - Go to start of document
 - `Ctrl+End` - Go to end of document
+
+### Mouse Controls 🖱️
+- **Left click** - Move cursor to clicked position
+- **Double-click** - Select word at position
+- **Right-click** - Show context menu with available actions
+- **Click and drag** - Select text with visual highlighting
+- **Scroll wheel** - Scroll up/down through document
 
 ### Features
 - `Ctrl+H` - Toggle syntax highlighting
@@ -113,6 +129,14 @@ Core file operations:
 - Efficient file reading and writing
 - Error handling and validation
 - Cross-platform file system support
+
+#### **Mouse Module** (`src/mouse.rs`)
+Full mouse interaction support:
+- Click and drag text selection
+- Double-click word selection
+- Mouse wheel scrolling
+- Right-click context menus
+- Visual selection highlighting
 
 ### Binary Targets
 
