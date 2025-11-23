@@ -235,7 +235,8 @@ impl IOCraftFileHandler {
         println!("│                                                             │");
         println!("│  ✅ Syntax highlighting for multiple languages             │");
         println!("│  ✅ File I/O operations with beautiful UI                  │");
-        println!("│  ✅ Interactive editing with vim-like modes               │");
+        println!("│  ✅ Interactive editing with Sublime Text-style controls  │");
+        println!("│  ✅ Full mouse support (click, drag, scroll, select)      │");
         println!("│  ✅ Crossterm integration for smooth terminal experience   │");
         println!("│                                                             │");
         println!("└─────────────────────────────────────────────────────────────┘");
