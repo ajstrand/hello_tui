@@ -67,17 +67,27 @@ editor-demo
 
 ### **Interactive Editor** (`text-editor`)
 - ✅ Full text editing capabilities
+- ✅ Beautiful line numbers with current line highlighting
+- ✅ Modern vertical cursor (Sublime Text style)
+- ✅ Enhanced status bar with three-column layout
+- ✅ Proper text alignment and natural tab handling
 - ✅ Sublime Text-style keyboard shortcuts
 - ✅ Mouse support (click, drag, scroll, select)
-- ✅ Real-time syntax highlighting
-- ✅ File operations (save, open, new)
+- ✅ Real-time syntax highlighting with 256-color support
+- ✅ File operations (save, open, new) with IOCraft dialogs
 - ✅ Text selection and manipulation
+- ✅ Smart line management (duplicate, delete)
+- ✅ Horizontal scrolling for long lines
 
 ### **Keyboard Shortcuts** (Interactive Editor)
 - `Ctrl+S` - Save file
-- `Ctrl+Q` - Quit
+- `Ctrl+O` - Open file (with IOCraft dialog)
 - `Ctrl+N` - New file
+- `Ctrl+Q` - Quit
 - `Ctrl+H` - Toggle syntax highlighting
+- `Ctrl+D` - Duplicate current line
+- `Ctrl+K` - Delete current line
+- `Ctrl+L` - Go to line (coming soon)
 - `Arrow keys` - Navigate
 - `Home/End` - Line start/end
 - `Ctrl+Home/End` - Document start/end

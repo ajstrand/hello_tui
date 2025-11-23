@@ -1,7 +1,7 @@
-use iocraft::prelude::*;
 use std::io;
 use std::path::Path;
 use crate::file_io::FileIO;
+use crate::iocraft_components::{loading_message, success_message, error_message, file_info_message, browser_header_message, recent_files_header_message};
 
 /// IOCraft-powered file I/O handler with beautiful UI components
 pub struct IOCraftFileHandler {
@@ -88,39 +88,27 @@ impl IOCraftFileHandler {
     /// Display a beautiful file info panel
     pub fn display_file_info(&self, filename: &str, lines: &[String]) {
         let path = Path::new(filename);
-        let file_name = path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(filename);
         let extension = path.extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("txt");
+        let status = if self.operation_success { "✅ OK" } else { "❌ Error" };
         
-        println!("┌─────────────────────────────────────────────────────────────┐");
-        println!("│ 📄 File Information                                         │");
-        println!("├─────────────────────────────────────────────────────────────┤");
-        println!("│ Name: {:<50} │", file_name);
-        println!("│ Path: {:<50} │", filename);
-        println!("│ Type: {:<50} │", extension.to_uppercase());
-        println!("│ Lines: {:<49} │", lines.len());
-        println!("│ Characters: {:<44} │", lines.iter().map(|l| l.len()).sum::<usize>());
-        println!("│ Status: {:<48} │", if self.operation_success { "✅ OK" } else { "❌ Error" });
-        println!("└─────────────────────────────────────────────────────────────┘");
+        println!("{}", file_info_message(filename, extension, lines.len(), status));
     }
 
     /// Display a loading message with IOCraft styling
     fn display_loading_message(&self, operation: &str, filename: &str) {
-        println!("🔄 {} \"{}\"...", operation, filename);
+        println!("{}", loading_message(operation, filename));
     }
 
     /// Display a success message with IOCraft styling
     fn display_success_message(&self, message: &str, filename: &str, line_count: usize) {
-        println!("✅ {}: \"{}\" ({} lines)", message, filename, line_count);
+        println!("{}", success_message(message, filename, line_count));
     }
 
     /// Display an error message with IOCraft styling
     fn display_error_message(&self, message: &str, filename: &str, error: &str) {
-        println!("❌ {}: \"{}\"", message, filename);
-        println!("   Error: {}", error);
+        println!("{}", error_message(message, filename, error));
     }
 
     /// Get the current file path
@@ -143,7 +131,7 @@ impl IOCraftFileHandler {
         use std::fs;
         
         println!("┌─────────────────────────────────────────────────────────────┐");
-        println!("│ 📁 File Browser: {:<45} │", directory);
+        println!("│ {:<59} │", browser_header_message(directory));
         println!("├─────────────────────────────────────────────────────────────┤");
         
         let mut files = Vec::new();
@@ -196,7 +184,7 @@ impl IOCraftFileHandler {
     /// Display recent files with IOCraft styling
     pub fn display_recent_files(&self, recent_files: &[String]) {
         println!("┌─────────────────────────────────────────────────────────────┐");
-        println!("│ 🕐 Recent Files                                             │");
+        println!("│ {:<59} │", recent_files_header_message());
         println!("├─────────────────────────────────────────────────────────────┤");
         
         if recent_files.is_empty() {

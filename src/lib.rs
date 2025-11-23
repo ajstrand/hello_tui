@@ -1,4 +1,9 @@
 pub mod file_io;
 pub mod syntax;
 pub mod iocraft_file;
+pub mod iocraft_components;
 pub mod mouse;
+pub mod linter;
+pub mod keys;
+pub mod render;
+pub mod cursor;

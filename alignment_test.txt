@@ -1,0 +1,9 @@
+This is line 1 with normal text
+	This line starts with a tab character
+    This line has 4 spaces at the start
+        This line has 8 spaces (double indent)
+Regular text again
+	Another tab-indented line
+Mixed    spacing   in   the   middle
+A very long line that should be truncated if it exceeds the terminal width and should show an ellipsis at the end when it gets cut off
+End of test file

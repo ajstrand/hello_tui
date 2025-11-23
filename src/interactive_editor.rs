@@ -1,17 +1,15 @@
-use std::io::{self, stdout, Write};
+use std::io::{self, stdout, stdin, Write};
 use crossterm::{
     terminal::{enable_raw_mode, disable_raw_mode, Clear, ClearType},
-    cursor::{MoveTo, Show, Hide},
+    cursor::{MoveTo, Show},
     event::{read, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, EnableMouseCapture, DisableMouseCapture},
     execute,
 };
-use hello_tui::{syntax, iocraft_file, mouse};
+use hello_tui::{syntax, iocraft_file, mouse, linter, keys::{KeyHandler, Direction}, render, cursor};
 
-#[derive(Default)]
 struct InteractiveTextEditor {
     lines: Vec<String>,
-    cursor_row: usize,
-    cursor_col: usize,
+    cursor: cursor::CursorController,
     filename: Option<String>,
     status_message: String,
     quit: bool,
@@ -22,16 +20,26 @@ struct InteractiveTextEditor {
     mouse_controller: mouse::MouseController,
     text_selection: Option<mouse::TextSelection>,
     scroll_offset: usize,
+    linter: linter::Linter,
+    lint_issues: Vec<linter::LintIssue>,
+    content: String,
+    // Anti-flicker optimization fields
+    last_render_time: std::time::Instant,
+    render_throttle_ms: u64,
+    needs_full_render: bool,
+    // Key handling
+    key_handler: KeyHandler,
+    // Rendering
+    renderer: render::EditorRenderer,
 }
 
 impl InteractiveTextEditor {
     fn new(filename: Option<String>) -> io::Result<Self> {
         let mut editor = Self {
             lines: vec!["".to_string()],
-            cursor_row: 0,
-            cursor_col: 0,
+            cursor: cursor::CursorController::new(),
             filename: filename.clone(),
-            status_message: "Ctrl+S: Save | Ctrl+O: Open | Ctrl+N: New | Ctrl+Q: Quit | Ctrl+H: Toggle highlighting | Mouse: Click to move cursor".to_string(),
+            status_message: "Ctrl+S: Save | Ctrl+O: Open | Ctrl+N: New | Ctrl+Q: Quit | Ctrl+H: Toggle highlighting | Ctrl+E: Toggle linting | Mouse: Click to move cursor".to_string(),
             quit: false,
             syntax_highlighter: syntax::SyntaxHighlighter::new(),
             syntax_enabled: true,
@@ -40,27 +48,41 @@ impl InteractiveTextEditor {
             mouse_controller: mouse::MouseController::new(),
             text_selection: None,
             scroll_offset: 0,
+            linter: linter::Linter::new(),
+            lint_issues: Vec::new(),
+            content: String::new(),
+            // Anti-flicker optimization initialization
+            last_render_time: std::time::Instant::now(),
+            render_throttle_ms: 16, // ~60 FPS throttling
+            needs_full_render: true,
+            // Key handling initialization
+            key_handler: KeyHandler::new(),
+            // Rendering initialization
+            renderer: render::EditorRenderer::new(),
         };
 
         if let Some(filename) = filename {
             editor.load_file(&filename)?;
         } else {
             editor.lines = vec![
-                "Welcome to IOCraft Text Editor (Sublime-style)!".to_string(),
+                "Welcome to IOCraft Enhanced Text Editor!".to_string(),
+                "".to_string(),
+                "Features:".to_string(),
+                "  ✨ Beautiful line numbers and syntax highlighting".to_string(),
+                "  🎯 Modern cursor and visual indicators".to_string(),
+                "  🖱️ Full mouse support (click, drag, select)".to_string(),
+                "  📁 IOCraft file dialogs and browser".to_string(),
+                "  ⌨️ Sublime Text-style keyboard shortcuts".to_string(),
+                "  🔍 Real-time code linting and issue detection".to_string(),
                 "".to_string(),
                 "Keyboard Shortcuts:".to_string(),
-                "  Ctrl+S - Save file".to_string(),
-                "  Ctrl+O - Open file".to_string(),
-                "  Ctrl+N - New file".to_string(),
-                "  Ctrl+Q - Quit".to_string(),
-                "  Ctrl+H - Toggle syntax highlighting".to_string(),
-                "  Ctrl+Z - Undo (coming soon)".to_string(),
-                "  Ctrl+Y - Redo (coming soon)".to_string(),
-                "  Arrow keys - Move cursor".to_string(),
-                "  Home/End - Start/End of line".to_string(),
-                "  Ctrl+Home/End - Start/End of document".to_string(),
+                "  📄 File: Ctrl+O (open), Ctrl+S (save), Ctrl+N (new)".to_string(),
+                "  ✂️ Edit: Ctrl+D (duplicate line), Ctrl+K (delete line)".to_string(),
+                "  🔍 Navigate: Ctrl+Home/End (document), Home/End (line)".to_string(),
+                "  🎨 View: Ctrl+H (toggle highlighting), Ctrl+E (toggle linting)".to_string(),
+                "  🚪 Quit: Ctrl+Q".to_string(),
                 "".to_string(),
-                "Start typing to edit...".to_string(),
+                "Start editing here...".to_string(),
             ];
         }
 
@@ -73,6 +95,9 @@ impl InteractiveTextEditor {
                 self.lines = lines;
                 self.filename = Some(filename.to_string());
                 self.status_message = format!("Loaded: {}", filename);
+                if self.linter.is_enabled() {
+                    self.run_linting();
+                }
                 Ok(())
             }
             Err(e) => {
@@ -103,85 +128,75 @@ impl InteractiveTextEditor {
     }
 
     fn move_cursor(&mut self, direction: Direction) {
-        match direction {
-            Direction::Up => {
-                if self.cursor_row > 0 {
-                    self.cursor_row -= 1;
-                    let line_len = self.lines[self.cursor_row].len();
-                    self.cursor_col = self.cursor_col.min(line_len);
-                }
-            }
-            Direction::Down => {
-                if self.cursor_row < self.lines.len() - 1 {
-                    self.cursor_row += 1;
-                    let line_len = self.lines[self.cursor_row].len();
-                    self.cursor_col = self.cursor_col.min(line_len);
-                }
-            }
-            Direction::Left => {
-                if self.cursor_col > 0 {
-                    self.cursor_col -= 1;
-                } else if self.cursor_row > 0 {
-                    self.cursor_row -= 1;
-                    self.cursor_col = self.lines[self.cursor_row].len();
-                }
-            }
-            Direction::Right => {
-                let line_len = self.lines[self.cursor_row].len();
-                if self.cursor_col < line_len {
-                    self.cursor_col += 1;
-                } else if self.cursor_row < self.lines.len() - 1 {
-                    self.cursor_row += 1;
-                    self.cursor_col = 0;
-                }
-            }
-        }
+        self.cursor.move_cursor(direction, &self.lines);
     }
 
     fn insert_char(&mut self, ch: char) {
-        if self.cursor_row < self.lines.len() {
-            let line = &mut self.lines[self.cursor_row];
+        let cursor_row = self.cursor.row();
+        let cursor_col = self.cursor.col();
+        
+        if cursor_row < self.lines.len() {
+            let line = &mut self.lines[cursor_row];
             let mut chars: Vec<char> = line.chars().collect();
-            chars.insert(self.cursor_col, ch);
+            chars.insert(cursor_col, ch);
             *line = chars.into_iter().collect();
-            self.cursor_col += 1;
+            
+            // Move cursor right after inserting character
+            self.cursor.move_cursor(Direction::Right, &self.lines);
             self.modified = true;
+            if self.linter.is_enabled() {
+                self.run_linting();
+            }
         }
     }
 
     fn delete_char(&mut self) {
-        if self.cursor_col > 0 && self.cursor_row < self.lines.len() {
-            let line = &mut self.lines[self.cursor_row];
+        let cursor_row = self.cursor.row();
+        let cursor_col = self.cursor.col();
+        
+        if cursor_col > 0 && cursor_row < self.lines.len() {
+            let line = &mut self.lines[cursor_row];
             let mut chars: Vec<char> = line.chars().collect();
-            if self.cursor_col <= chars.len() && self.cursor_col > 0 {
-                chars.remove(self.cursor_col - 1);
+            if cursor_col <= chars.len() && cursor_col > 0 {
+                chars.remove(cursor_col - 1);
                 *line = chars.into_iter().collect();
-                self.cursor_col -= 1;
+                self.cursor.move_cursor(Direction::Left, &self.lines);
                 self.modified = true;
+                if self.linter.is_enabled() {
+                    self.run_linting();
+                }
             }
-        } else if self.cursor_row > 0 && self.cursor_col == 0 {
+        } else if cursor_row > 0 && cursor_col == 0 {
             // Join with previous line
-            let current_line = self.lines.remove(self.cursor_row);
-            self.cursor_row -= 1;
-            self.cursor_col = self.lines[self.cursor_row].len();
-            self.lines[self.cursor_row].push_str(&current_line);
+            let current_line = self.lines.remove(cursor_row);
+            let new_cursor_col = self.lines[cursor_row - 1].len();
+            self.lines[cursor_row - 1].push_str(&current_line);
+            self.cursor.set_position(cursor_row - 1, new_cursor_col);
             self.modified = true;
+            if self.linter.is_enabled() {
+                self.run_linting();
+            }
         }
     }
 
     fn insert_newline(&mut self) {
-        if self.cursor_row < self.lines.len() {
-            let cursor_col = self.cursor_col;
-            let line = self.lines[self.cursor_row].clone();
+        let cursor_row = self.cursor.row();
+        let cursor_col = self.cursor.col();
+        
+        if cursor_row < self.lines.len() {
+            let line = self.lines[cursor_row].clone();
             let (left, right) = line.split_at(cursor_col);
-            self.lines[self.cursor_row] = left.to_string();
-            self.lines.insert(self.cursor_row + 1, right.to_string());
+            self.lines[cursor_row] = left.to_string();
+            self.lines.insert(cursor_row + 1, right.to_string());
         } else {
             self.lines.push(String::new());
         }
-        self.cursor_row += 1;
-        self.cursor_col = 0;
+        
+        self.cursor.set_position(cursor_row + 1, 0);
         self.modified = true;
+        if self.linter.is_enabled() {
+            self.run_linting();
+        }
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -213,6 +228,13 @@ impl InteractiveTextEditor {
                     self.status_message = "File saved successfully!".to_string();
                     self.modified = false;
                 }
+                self.mark_for_full_render(); // Save affects status bar
+            }
+            
+            // Ctrl+O - Open file
+            (true, KeyCode::Char('o')) => {
+                self.open_file_dialog();
+                self.mark_for_full_render(); // File open changes everything
             }
             
             // Ctrl+H - Toggle syntax highlighting
@@ -220,6 +242,23 @@ impl InteractiveTextEditor {
                 self.syntax_enabled = !self.syntax_enabled;
                 let status = if self.syntax_enabled { "enabled" } else { "disabled" };
                 self.status_message = format!("Syntax highlighting {}", status);
+                if self.linter.is_enabled() {
+                    self.run_linting();
+                }
+                self.mark_for_full_render(); // Highlighting affects all content
+            }
+            
+            // Ctrl+E - Toggle linting
+            (true, KeyCode::Char('e')) => {
+                self.linter.toggle();
+                let status = if self.linter.is_enabled() { "enabled" } else { "disabled" };
+                self.status_message = format!("Code linting {}", status);
+                if self.linter.is_enabled() {
+                    self.run_linting();
+                } else {
+                    self.lint_issues.clear();
+                }
+                self.mark_for_full_render(); // Linting affects line indicators and status
             }
             
             // Ctrl+N - New file
@@ -228,8 +267,7 @@ impl InteractiveTextEditor {
                     self.status_message = "Save current file before creating new one (Ctrl+S)".to_string();
                 } else {
                     self.lines = vec!["".to_string()];
-                    self.cursor_row = 0;
-                    self.cursor_col = 0;
+                    self.cursor.set_position(0, 0);
                     self.filename = None;
                     self.modified = false;
                     self.status_message = "New file created".to_string();
@@ -238,16 +276,52 @@ impl InteractiveTextEditor {
             
             // Ctrl+Home - Go to start of document
             (true, KeyCode::Home) => {
-                self.cursor_row = 0;
-                self.cursor_col = 0;
+                self.cursor.move_to_document_start();
                 self.status_message = "Start of document".to_string();
             }
             
             // Ctrl+End - Go to end of document
             (true, KeyCode::End) => {
-                self.cursor_row = if self.lines.is_empty() { 0 } else { self.lines.len() - 1 };
-                self.cursor_col = if self.lines.is_empty() { 0 } else { self.lines[self.cursor_row].len() };
+                self.cursor.move_to_document_end(&self.lines);
                 self.status_message = "End of document".to_string();
+            }
+            
+            // Ctrl+L - Go to line
+            (true, KeyCode::Char('l')) => {
+                self.status_message = "Go to line: (feature coming soon)".to_string();
+            }
+            
+            // Ctrl+D - Duplicate line
+            (true, KeyCode::Char('d')) => {
+                let cursor_row = self.cursor.row();
+                if cursor_row < self.lines.len() {
+                    let line_to_duplicate = self.lines[cursor_row].clone();
+                    self.lines.insert(cursor_row + 1, line_to_duplicate);
+                    self.cursor.set_position(cursor_row + 1, self.cursor.col());
+                    self.modified = true;
+                    self.status_message = "Line duplicated".to_string();
+                }
+            }
+            
+            // Ctrl+K - Delete line
+            (true, KeyCode::Char('k')) => {
+                let cursor_row = self.cursor.row();
+                if cursor_row < self.lines.len() && self.lines.len() > 1 {
+                    self.lines.remove(cursor_row);
+                    let new_row = if cursor_row >= self.lines.len() {
+                        self.lines.len() - 1
+                    } else {
+                        cursor_row
+                    };
+                    self.cursor.set_position(new_row, 0);
+                    self.modified = true;
+                    self.status_message = "Line deleted".to_string();
+                } else if self.lines.len() == 1 {
+                    self.lines[0].clear();
+                    self.cursor.set_position(cursor_row, 0);
+                    self.modified = true;
+                    self.status_message = "Line cleared".to_string();
+                }
             }
 
             // Regular character input
@@ -281,17 +355,20 @@ impl InteractiveTextEditor {
                     self.delete_selected_text();
                 } else {
                     // Delete character forward
-                    if self.cursor_row < self.lines.len() {
-                        let line = &mut self.lines[self.cursor_row];
+                    let cursor_row = self.cursor.row();
+                    let cursor_col = self.cursor.col();
+                    
+                    if cursor_row < self.lines.len() {
+                        let line = &mut self.lines[cursor_row];
                         let mut chars: Vec<char> = line.chars().collect();
-                        if self.cursor_col < chars.len() {
-                            chars.remove(self.cursor_col);
+                        if cursor_col < chars.len() {
+                            chars.remove(cursor_col);
                             *line = chars.into_iter().collect();
                             self.modified = true;
-                        } else if self.cursor_row < self.lines.len() - 1 {
+                        } else if cursor_row < self.lines.len() - 1 {
                             // Join with next line
-                            let next_line = self.lines.remove(self.cursor_row + 1);
-                            self.lines[self.cursor_row].push_str(&next_line);
+                            let next_line = self.lines.remove(cursor_row + 1);
+                            self.lines[cursor_row].push_str(&next_line);
                             self.modified = true;
                         }
                     }
@@ -300,14 +377,12 @@ impl InteractiveTextEditor {
             
             // Home - Go to start of line
             (false, KeyCode::Home) => {
-                self.cursor_col = 0;
+                self.cursor.move_to_line_start();
             }
             
             // End - Go to end of line
             (false, KeyCode::End) => {
-                if self.cursor_row < self.lines.len() {
-                    self.cursor_col = self.lines[self.cursor_row].len();
-                }
+                self.cursor.move_to_line_end(&self.lines);
             }
 
             // Movement commands
@@ -328,11 +403,13 @@ impl InteractiveTextEditor {
                 self.move_cursor_to_position(row, col);
                 self.text_selection = None;
                 self.status_message = format!("Cursor moved to row {}, col {}", row + 1, col + 1);
+                self.mark_for_full_render(); // Click needs full render for cursor position
             }
             
             mouse::MouseAction::DoubleClick { row, col } => {
                 self.select_word_at_position(row, col);
                 self.status_message = "Word selected (double-click)".to_string();
+                self.mark_for_full_render(); // Selection needs full render
             }
             
             mouse::MouseAction::DragEnd { start_row, start_col, end_row, end_col } => {
@@ -343,11 +420,13 @@ impl InteractiveTextEditor {
                     let char_count = selected_text.chars().count();
                     self.status_message = format!("Selected {} characters", char_count);
                 }
+                self.mark_for_full_render(); // Selection end needs full render
             }
             
             mouse::MouseAction::RightClick { row, col } => {
                 self.move_cursor_to_position(row, col);
                 self.show_context_menu(row, col);
+                self.mark_for_full_render(); // Context menu needs full render
             }
             
             mouse::MouseAction::ScrollUp => {
@@ -355,6 +434,7 @@ impl InteractiveTextEditor {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                 }
                 self.status_message = "Scrolled up".to_string();
+                self.mark_for_full_render(); // Scroll needs full render for content change
             }
             
             mouse::MouseAction::ScrollDown => {
@@ -363,11 +443,13 @@ impl InteractiveTextEditor {
                     self.scroll_offset = (self.scroll_offset + 3).min(max_scroll);
                 }
                 self.status_message = "Scrolled down".to_string();
+                self.mark_for_full_render(); // Scroll needs full render for content change
             }
             
             mouse::MouseAction::Drag { start_row: _, start_col: _, current_row, current_col } => {
                 self.move_cursor_to_position(current_row, current_col);
                 self.status_message = "Selecting text...".to_string();
+                // Don't mark for full render during drag - use throttled rendering instead
             }
             
             mouse::MouseAction::None => {}
@@ -375,14 +457,7 @@ impl InteractiveTextEditor {
     }
 
     fn move_cursor_to_position(&mut self, row: usize, col: usize) {
-        // Adjust for scroll offset
-        let actual_row = row + self.scroll_offset;
-        
-        if actual_row < self.lines.len() {
-            self.cursor_row = actual_row;
-            let line_len = self.lines[self.cursor_row].len();
-            self.cursor_col = col.min(line_len);
-        }
+        self.cursor.move_to_position(row, col, self.scroll_offset, &self.lines);
     }
 
     fn select_word_at_position(&mut self, row: usize, col: usize) {
@@ -396,8 +471,7 @@ impl InteractiveTextEditor {
                 actual_row, start_col, actual_row, end_col
             ));
             
-            self.cursor_row = actual_row;
-            self.cursor_col = end_col;
+            self.cursor.set_position(actual_row, end_col);
         }
     }
 
@@ -458,160 +532,65 @@ impl InteractiveTextEditor {
                 self.lines[start_row] = start_line_part + &end_line_part;
             }
 
-            self.cursor_row = start_row;
-            self.cursor_col = start_col;
+            self.cursor.set_position(start_row, start_col);
             self.text_selection = None;
             self.modified = true;
         }
     }
 
-    fn render(&self) -> io::Result<()> {
-        execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0), Hide)?;
+    fn run_linting(&mut self) {
+        // Update content from lines
+        self.content = self.lines.join("\n");
+        
+        // Run linting with new API
+        self.lint_issues = self.linter.lint(&self.content, self.filename.as_deref());
+    }
 
-        let syntax_name = if self.syntax_enabled {
-            self.syntax_highlighter.get_syntax_name(self.filename.as_deref())
-        } else {
-            "Plain Text".to_string()
-        };
-
-        let terminal_height = crossterm::terminal::size()?.1 as usize;
-        let visible_lines = terminal_height.saturating_sub(3); // Reserve space for status
-
-        // Render content with scroll offset
-        for (_, actual_row) in (self.scroll_offset..self.scroll_offset + visible_lines)
-            .enumerate()
-            .take_while(|(_, actual_row)| *actual_row < self.lines.len())
-        {
-            let line = &self.lines[actual_row];
-            
-            // Check if this line has selection
-            let line_has_selection = self.text_selection.as_ref()
-                .map(|sel| sel.start_row <= actual_row && actual_row <= sel.end_row)
-                .unwrap_or(false);
-            
-            if actual_row == self.cursor_row && !line_has_selection {
-                // Show cursor on current line (without selection)
-                let (before_cursor, after_cursor) = if self.cursor_col <= line.len() {
-                    (
-                        &line[..self.cursor_col.min(line.len())],
-                        &line[self.cursor_col.min(line.len())..]
-                    )
-                } else {
-                    (line.as_str(), "")
-                };
-
-                // Apply syntax highlighting to the parts
-                let highlighted_before = if self.syntax_enabled {
-                    self.syntax_highlighter.highlight_line(before_cursor, &syntax_name)
-                } else {
-                    before_cursor.to_string()
-                };
-
-                let highlighted_after = if self.syntax_enabled && !after_cursor.is_empty() {
-                    self.syntax_highlighter.highlight_line(after_cursor, &syntax_name)
-                } else {
-                    after_cursor.to_string()
-                };
-
-                print!("{}", highlighted_before);
-                
-                // Show cursor (always insert mode cursor for Sublime Text style)
-                print!("\x1b[7m \x1b[0m"); // Inverted space for cursor
-                print!("{}", highlighted_after);
-            } else if line_has_selection {
-                // Render line with selection highlighting
-                self.render_line_with_selection(line, actual_row, &syntax_name)?;
-            } else {
-                // Regular line without cursor or selection
-                if self.syntax_enabled {
-                    let highlighted = self.syntax_highlighter.highlight_line(line, &syntax_name);
-                    print!("{}", highlighted);
-                } else {
-                    print!("{}", line);
-                }
-            }
-            println!();
+    /// Throttled render that prevents excessive screen updates during mouse events
+    fn render_throttled(&mut self) -> io::Result<()> {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_render_time).as_millis() as u64;
+        
+        // Only render if enough time has passed or if we need a full render
+        if elapsed >= self.render_throttle_ms || self.needs_full_render {
+            self.render()?;
+            self.last_render_time = now;
+            self.needs_full_render = false;
         }
-
-        // Render status line
-        let filename = self.filename.as_deref().unwrap_or("[No file]");
-        let syntax_status = if self.syntax_enabled {
-            format!("({})", syntax_name)
-        } else {
-            "(No highlighting)".to_string()
-        };
         
-        let modified_indicator = if self.modified { "*" } else { "" };
-        let selection_info = if let Some(ref sel) = self.text_selection {
-            let selected_text = sel.get_selected_text(&self.lines);
-            format!(" | {} chars selected", selected_text.chars().count())
-        } else {
-            String::new()
-        };
-        
-        println!();
-        println!("-- {} {}{} | Row: {}, Col: {} | {}{}", 
-                 filename, modified_indicator, syntax_status, 
-                 self.cursor_row + 1, self.cursor_col + 1, 
-                 self.status_message, selection_info);
-
-        stdout().flush()?;
         Ok(())
     }
 
-    fn render_line_with_selection(&self, line: &str, row: usize, syntax_name: &str) -> io::Result<()> {
-        if let Some(ref selection) = self.text_selection {
-            let chars: Vec<char> = line.chars().collect();
-            
-            for (col, ch) in chars.iter().enumerate() {
-                let is_selected = selection.contains(row, col);
-                let is_cursor = row == self.cursor_row && col == self.cursor_col;
-                
-                if is_cursor && is_selected {
-                    // Cursor within selection
-                    print!("\x1b[7;4m{}\x1b[0m", ch); // Inverted and underlined
-                } else if is_cursor {
-                    // Cursor outside selection
-                    print!("\x1b[7m{}\x1b[0m", ch); // Inverted
-                } else if is_selected {
-                    // Selected text
-                    print!("\x1b[7m{}\x1b[0m", ch); // Inverted (highlighted)
-                } else {
-                    // Normal text
-                    if self.syntax_enabled {
-                        let char_str = ch.to_string();
-                        let highlighted = self.syntax_highlighter.highlight_line(&char_str, syntax_name);
-                        print!("{}", highlighted);
-                    } else {
-                        print!("{}", ch);
-                    }
-                }
-            }
-            
-            // Handle cursor at end of line
-            if row == self.cursor_row && self.cursor_col >= chars.len() {
-                print!("\x1b[7m \x1b[0m"); // Cursor at end of line
-            }
-        } else {
-            // Fallback to regular rendering
-            if self.syntax_enabled {
-                let highlighted = self.syntax_highlighter.highlight_line(line, syntax_name);
-                print!("{}", highlighted);
-            } else {
-                print!("{}", line);
-            }
-        }
-        
-        Ok(())
+    /// Force a full render on the next update
+    fn mark_for_full_render(&mut self) {
+        self.needs_full_render = true;
+    }
+
+    fn render(&self) -> io::Result<()> {
+        self.renderer.render_editor(
+            &self.lines,
+            self.cursor.row(),
+            self.cursor.col(),
+            self.filename.as_deref(),
+            self.modified,
+            &self.status_message,
+            &self.syntax_highlighter,
+            self.syntax_enabled,
+            self.scroll_offset,
+            &self.lint_issues,
+            &self.linter,
+            self.text_selection.as_ref(),
+        )
     }
 
     fn run(&mut self) -> io::Result<()> {
         enable_raw_mode()?;
-        execute!(stdout(), EnableMouseCapture)?;
+        execute!(stdout(), EnableMouseCapture, Clear(ClearType::All))?;
+
+        // Initial render
+        self.render()?;
 
         while !self.quit {
-            self.render()?;
-
             match read()? {
                 Event::Key(key_event) => {
                     // Handle Ctrl+C to quit
@@ -619,9 +598,19 @@ impl InteractiveTextEditor {
                         break;
                     }
                     self.handle_key_event(key_event);
+                    // Use optimized rendering for better performance
+                    if self.needs_full_render {
+                        self.render()?;
+                        self.last_render_time = std::time::Instant::now();
+                        self.needs_full_render = false;
+                    } else {
+                        self.render_throttled()?;
+                    }
                 }
                 Event::Mouse(mouse_event) => {
                     self.handle_mouse_event(mouse_event);
+                    // Use throttled rendering for mouse events to prevent flickering
+                    self.render_throttled()?;
                 }
                 _ => {}
             }
@@ -632,14 +621,185 @@ impl InteractiveTextEditor {
         execute!(stdout(), Show, Clear(ClearType::All), MoveTo(0, 0))?;
         Ok(())
     }
-}
 
-#[derive(Debug)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
+    fn open_file_dialog(&mut self) {
+        if self.modified {
+            self.status_message = "Save current file before opening new one (Ctrl+S)".to_string();
+            return;
+        }
+
+        // Clear the screen for the dialog
+        execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)).ok();
+        
+        // Show IOCraft file browser dialog with enhanced UI
+        println!("┌─────────────────────────────────────────────────────────────┐");
+        println!("│ 📂 Open File - IOCraft File Browser                        │");
+        println!("├─────────────────────────────────────────────────────────────┤");
+        println!("│                                                             │");
+        println!("│ 🎯 Navigate and select a file to open:                     │");
+        println!("│                                                             │");
+        
+        // Get current directory files
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Ok(_files) = self.iocraft_handler.display_file_browser(current_dir.to_str().unwrap_or(".")) {
+            println!("│                                                             │");
+            println!("├─────────────────────────────────────────────────────────────┤");
+            println!("│ 🚀 Quick Actions:                                          │");
+            println!("│                                                             │");
+            println!("│  📝 [1] Type filename below                                │");
+            println!("│  📁 [2] Browse recent files                                │");
+            println!("│  🆕 [3] Create new file                                    │");
+            println!("│  ❌ [ESC] Cancel and return to editor                     │");
+            println!("│                                                             │");
+            println!("├─────────────────────────────────────────────────────────────┤");
+            print!("│ 📝 Enter filename or action [1-3]: ");
+            stdout().flush().ok();
+
+            // Read user input for filename or action
+            if let Some(input) = self.read_filename_input() {
+                let input = input.trim();
+                
+                if input.is_empty() {
+                    self.status_message = "No input provided".to_string();
+                    return;
+                }
+                
+                match input {
+                    "1" => {
+                        println!("│                                                             │");
+                        print!("│ 📝 Filename: ");
+                        stdout().flush().ok();
+                        
+                        if let Some(filename) = self.read_filename_input() {
+                            self.process_file_open(&filename.trim());
+                        }
+                    }
+                    "2" => {
+                        self.show_recent_files_dialog();
+                    }
+                    "3" => {
+                        println!("│                                                             │");
+                        print!("│ 🆕 New filename: ");
+                        stdout().flush().ok();
+                        
+                        if let Some(filename) = self.read_filename_input() {
+                            let filename = filename.trim();
+                            if !filename.is_empty() {
+                                self.create_new_file_interactive(&filename);
+                            }
+                        }
+                    }
+                    _ => {
+                        // Try to open as filename directly
+                        self.process_file_open(input);
+                    }
+                }
+            } else {
+                self.status_message = "Open canceled".to_string();
+            }
+        } else {
+            self.status_message = "Error reading directory".to_string();
+        }
+        
+        println!("│                                                             │");
+        println!("└─────────────────────────────────────────────────────────────┘");
+        
+        // Brief pause to show result
+        std::thread::sleep(std::time::Duration::from_millis(800));
+    }
+
+    fn process_file_open(&mut self, filename: &str) {
+        if filename.is_empty() {
+            self.status_message = "No file specified".to_string();
+            return;
+        }
+        
+        // Attempt to load the file
+        match self.load_file(filename) {
+            Ok(()) => {
+                self.status_message = format!("✅ Opened: {}", filename);
+            }
+            Err(_) => {
+                // Offer to create new file if it doesn't exist
+                self.offer_create_new_file(filename);
+            }
+        }
+    }
+
+    fn show_recent_files_dialog(&mut self) {
+        println!("│                                                             │");
+        println!("│ 📁 Recent Files:                                           │");
+        
+        // Show recent files (for now, we'll show some common file extensions in the directory)
+        let recent_files: Vec<String> = vec![
+            "sample.rs".to_string(), 
+            "sample.js".to_string(), 
+            "sample.txt".to_string(), 
+            "README.md".to_string(), 
+            "Cargo.toml".to_string()
+        ];
+        
+        self.iocraft_handler.display_recent_files(&recent_files);
+        
+        println!("│                                                             │");
+        print!("│ 📝 Select file (or type name): ");
+        stdout().flush().ok();
+        
+        if let Some(filename) = self.read_filename_input() {
+            self.process_file_open(&filename.trim());
+        }
+    }
+
+    fn create_new_file_interactive(&mut self, filename: &str) {
+        self.lines = vec!["".to_string()];
+        self.cursor.set_position(0, 0);
+        self.filename = Some(filename.to_string());
+        self.modified = true; // Mark as modified since it's new
+        self.status_message = format!("🆕 New file '{}' created - ready for editing!", filename);
+    }
+
+    fn read_filename_input(&mut self) -> Option<String> {
+        // Temporarily disable raw mode for text input
+        disable_raw_mode().ok();
+        
+        let mut input = String::new();
+        match stdin().read_line(&mut input) {
+            Ok(_) => {
+                // Re-enable raw mode
+                enable_raw_mode().ok();
+                Some(input.trim().to_string())
+            }
+            Err(_) => {
+                enable_raw_mode().ok();
+                None
+            }
+        }
+    }
+
+    fn offer_create_new_file(&mut self, filename: &str) {
+        println!("│                                                             │");
+        println!("│ ⚠️  File '{}' not found.                     │", filename);
+        println!("│                                                             │");
+        println!("│ 🆕 Would you like to create a new file? (y/n)              │");
+        print!("│ 📝 Your choice: ");
+        stdout().flush().ok();
+
+        if let Some(response) = self.read_filename_input() {
+            if response.to_lowercase().starts_with('y') {
+                // Create new file
+                self.lines = vec!["".to_string()];
+                self.cursor.set_position(0, 0);
+                self.filename = Some(filename.to_string());
+                self.modified = false;
+                self.status_message = format!("New file '{}' ready for editing", filename);
+            } else {
+                self.status_message = "File creation canceled".to_string();
+            }
+        } else {
+            self.status_message = "File creation canceled".to_string();
+        }
+    }
+
 }
 
 fn main() -> io::Result<()> {

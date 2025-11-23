@@ -1,6 +1,5 @@
-use iocraft::prelude::*;
 use std::io;
-use hello_tui::{file_io, syntax};
+use hello_tui::{file_io, syntax, iocraft_components};
 
 mod editor_demo;
 
@@ -135,7 +134,7 @@ enum Direction {
 }
 
 fn main() -> io::Result<()> {
-    println!("🎉 IOCraft Text Editor");
+    println!("{}", iocraft_components::welcome_message());
     println!("======================");
     println!();
     
