@@ -1,0 +1,33 @@
+[package]
+name = "hello_tui"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "hello_tui"
+path = "src/lib.rs"
+
+[dependencies]
+iocraft = "0.3"
+crossterm = "0.28"
+syntect = "5.1"
+
+[[bin]]
+name = "hello_tui"
+path = "src/main.rs"
+
+[[bin]]
+name = "quick_editor"
+path = "src/quick_editor.rs"
+
+[[bin]]
+name = "editor_demo"
+path = "src/editor_demo.rs"
+
+[[bin]]
+name = "interactive_editor"
+path = "src/interactive_editor.rs"
+
+[[bin]]
+name = "file_demo"
+path = "src/file_demo.rs"
