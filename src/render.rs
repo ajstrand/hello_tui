@@ -3,7 +3,9 @@ use crossterm::{
     cursor::{MoveTo, Hide},
     execute,
 };
-use crate::{syntax, linter, mouse};
+use crate::{syntax, linter, mouse, i18n};
+use fluent_bundle::FluentValue;
+use std::collections::HashMap;
 
 /// Rendering module for the text editor
 pub struct EditorRenderer;
@@ -35,7 +37,7 @@ impl EditorRenderer {
         let syntax_name = if syntax_enabled {
             syntax_highlighter.get_syntax_name(filename)
         } else {
-            "Plain Text".to_string()
+            i18n::t("ui-plain-text")
         };
 
         let terminal_size = crossterm::terminal::size()?;
@@ -70,7 +72,6 @@ impl EditorRenderer {
             cursor_row,
             cursor_col,
             status_message,
-            lines.len(),
             &syntax_name,
             lint_issues,
             linter,
@@ -91,12 +92,13 @@ impl EditorRenderer {
         syntax_enabled: bool,
         terminal_width: usize,
     ) -> io::Result<()> {
-        let filename = filename.unwrap_or("[No file]");
+        let no_file_text = i18n::t("ui-no-file");
+        let filename = filename.unwrap_or(&no_file_text);
         let modified_indicator = if modified { " ●" } else { "" };
         let syntax_indicator = if syntax_enabled { 
             format!(" [{}]", syntax_name) 
         } else { 
-            " [Plain Text]".to_string() 
+            format!(" [{}]", i18n::t("ui-plain-text"))
         };
         
         let header = format!("📝 {}{}{}", filename, modified_indicator, syntax_indicator);
@@ -343,7 +345,6 @@ impl EditorRenderer {
         cursor_row: usize,
         cursor_col: usize,
         status_message: &str,
-        line_count: usize,
         syntax_name: &str,
         lint_issues: &[linter::LintIssue],
         linter: &linter::Linter,
@@ -352,10 +353,22 @@ impl EditorRenderer {
     ) -> io::Result<()> {
         // Enhanced status line with better formatting
         print!("\x1b[2K"); // Clear status line
-        let cursor_info = format!("Ln {}, Col {}", cursor_row + 1, cursor_col + 1);
+        
+        let mut args = HashMap::new();
+        args.insert("row".to_string(), FluentValue::from(cursor_row + 1));
+        args.insert("col".to_string(), FluentValue::from(cursor_col + 1));
+        let cursor_info = format!("{} {}, {} {}", 
+            i18n::t("ui-line-prefix"), cursor_row + 1,
+            i18n::t("ui-column-prefix"), cursor_col + 1
+        );
+        
         let selection_info = if let Some(sel) = text_selection {
             let selected_text = sel.get_selected_text(lines);
-            format!(" | {} chars selected", selected_text.chars().count())
+            let char_count = selected_text.chars().count();
+            
+            let mut args = HashMap::new();
+            args.insert("count".to_string(), FluentValue::from(char_count));
+            format!(" | {}", i18n::t_with_args("ui-chars-selected", args))
         } else {
             String::new()
         };
@@ -377,7 +390,12 @@ impl EditorRenderer {
             String::new()
         };
         
-        let right_status = format!("{} | {} lines{}", syntax_name, line_count, lint_info);
+        let line_count = lines.len();
+        let mut args = HashMap::new();
+        args.insert("count".to_string(), FluentValue::from(line_count));
+        let line_count_text = i18n::t_with_args("ui-line-count", args);
+        
+        let right_status = format!("{} | {}{}", syntax_name, line_count_text, lint_info);
         let center_message = status_message;
         
         // Status line with dark background

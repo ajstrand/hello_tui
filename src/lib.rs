@@ -7,3 +7,4 @@ pub mod linter;
 pub mod keys;
 pub mod render;
 pub mod cursor;
+pub mod i18n;

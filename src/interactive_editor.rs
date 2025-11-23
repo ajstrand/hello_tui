@@ -5,7 +5,9 @@ use crossterm::{
     event::{read, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, EnableMouseCapture, DisableMouseCapture},
     execute,
 };
-use hello_tui::{syntax, iocraft_file, mouse, linter, keys::{KeyHandler, Direction}, render, cursor};
+use hello_tui::{syntax, iocraft_file, mouse, linter, keys::{KeyHandler, Direction}, render, cursor, i18n};
+use fluent_bundle::FluentValue;
+use std::collections::HashMap;
 
 struct InteractiveTextEditor {
     lines: Vec<String>,
@@ -39,7 +41,7 @@ impl InteractiveTextEditor {
             lines: vec!["".to_string()],
             cursor: cursor::CursorController::new(),
             filename: filename.clone(),
-            status_message: "Ctrl+S: Save | Ctrl+O: Open | Ctrl+N: New | Ctrl+Q: Quit | Ctrl+H: Toggle highlighting | Ctrl+E: Toggle linting | Mouse: Click to move cursor".to_string(),
+            status_message: i18n::t("help-status-message"),
             quit: false,
             syntax_highlighter: syntax::SyntaxHighlighter::new(),
             syntax_enabled: true,
@@ -65,24 +67,24 @@ impl InteractiveTextEditor {
             editor.load_file(&filename)?;
         } else {
             editor.lines = vec![
-                "Welcome to IOCraft Enhanced Text Editor!".to_string(),
-                "".to_string(),
-                "Features:".to_string(),
-                "  ✨ Beautiful line numbers and syntax highlighting".to_string(),
-                "  🎯 Modern cursor and visual indicators".to_string(),
-                "  🖱️ Full mouse support (click, drag, select)".to_string(),
-                "  📁 IOCraft file dialogs and browser".to_string(),
-                "  ⌨️ Sublime Text-style keyboard shortcuts".to_string(),
-                "  🔍 Real-time code linting and issue detection".to_string(),
-                "".to_string(),
-                "Keyboard Shortcuts:".to_string(),
-                "  📄 File: Ctrl+O (open), Ctrl+S (save), Ctrl+N (new)".to_string(),
-                "  ✂️ Edit: Ctrl+D (duplicate line), Ctrl+K (delete line)".to_string(),
-                "  🔍 Navigate: Ctrl+Home/End (document), Home/End (line)".to_string(),
-                "  🎨 View: Ctrl+H (toggle highlighting), Ctrl+E (toggle linting)".to_string(),
-                "  🚪 Quit: Ctrl+Q".to_string(),
-                "".to_string(),
-                "Start editing here...".to_string(),
+                i18n::t("welcome-title"),
+                String::new(),
+                i18n::t("welcome-features"),
+                format!("  {}", i18n::t("welcome-feature-highlighting")),
+                format!("  {}", i18n::t("welcome-feature-cursor")),
+                format!("  {}", i18n::t("welcome-feature-mouse")),
+                format!("  {}", i18n::t("welcome-feature-dialogs")),
+                format!("  {}", i18n::t("welcome-feature-shortcuts")),
+                format!("  {}", i18n::t("welcome-feature-linting")),
+                String::new(),
+                i18n::t("welcome-shortcuts"),
+                format!("  {}", i18n::t("welcome-shortcuts-file")),
+                format!("  {}", i18n::t("welcome-shortcuts-edit")),
+                format!("  {}", i18n::t("welcome-shortcuts-navigate")),
+                format!("  {}", i18n::t("welcome-shortcuts-view")),
+                format!("  {}", i18n::t("welcome-shortcuts-quit")),
+                String::new(),
+                i18n::t("welcome-start-editing"),
             ];
         }
 
@@ -94,14 +96,21 @@ impl InteractiveTextEditor {
             Ok(lines) => {
                 self.lines = lines;
                 self.filename = Some(filename.to_string());
-                self.status_message = format!("Loaded: {}", filename);
+                
+                let mut args = HashMap::new();
+                args.insert("filename".to_string(), FluentValue::from(filename));
+                self.status_message = i18n::t_with_args("file-loaded", args);
+                
                 if self.linter.is_enabled() {
                     self.run_linting();
                 }
                 Ok(())
             }
             Err(e) => {
-                self.status_message = format!("Error loading {}: {}", filename, e);
+                let mut args = HashMap::new();
+                args.insert("filename".to_string(), FluentValue::from(filename));
+                args.insert("error".to_string(), FluentValue::from(e.to_string()));
+                self.status_message = i18n::t_with_args("file-error-loading", args);
                 Err(e)
             }
         }
@@ -117,11 +126,16 @@ impl InteractiveTextEditor {
         match self.iocraft_handler.save_file(&filename, &self.lines) {
             Ok(()) => {
                 self.filename = Some(filename.clone());
-                self.status_message = format!("Saved: {}", filename);
+                let mut args = HashMap::new();
+                args.insert("filename".to_string(), FluentValue::from(filename));
+                self.status_message = i18n::t_with_args("file-saved", args);
                 Ok(())
             }
             Err(e) => {
-                self.status_message = format!("Error saving {}: {}", filename, e);
+                let mut args = HashMap::new();
+                args.insert("filename".to_string(), FluentValue::from(filename));
+                args.insert("error".to_string(), FluentValue::from(e.to_string()));
+                self.status_message = i18n::t_with_args("file-error-saving", args);
                 Err(e)
             }
         }
@@ -213,7 +227,7 @@ impl InteractiveTextEditor {
             // Ctrl+Q - Quit
             (true, KeyCode::Char('q')) => {
                 if self.modified {
-                    self.status_message = "File has unsaved changes! Press Ctrl+Q again to quit without saving.".to_string();
+                    self.status_message = i18n::t("file-unsaved-changes");
                     self.modified = false; // Allow quit on second Ctrl+Q
                 } else {
                     self.quit = true;
@@ -223,9 +237,11 @@ impl InteractiveTextEditor {
             // Ctrl+S - Save
             (true, KeyCode::Char('s')) => {
                 if let Err(e) = self.save_file() {
-                    self.status_message = format!("Error saving: {}", e);
+                    let mut args = HashMap::new();
+                    args.insert("error".to_string(), FluentValue::from(e.to_string()));
+                    self.status_message = i18n::t_with_args("error-file-operation", args);
                 } else {
-                    self.status_message = "File saved successfully!".to_string();
+                    self.status_message = i18n::t("status-file-saved");
                     self.modified = false;
                 }
                 self.mark_for_full_render(); // Save affects status bar
@@ -240,8 +256,11 @@ impl InteractiveTextEditor {
             // Ctrl+H - Toggle syntax highlighting
             (true, KeyCode::Char('h')) => {
                 self.syntax_enabled = !self.syntax_enabled;
-                let status = if self.syntax_enabled { "enabled" } else { "disabled" };
-                self.status_message = format!("Syntax highlighting {}", status);
+                self.status_message = if self.syntax_enabled { 
+                    i18n::t("status-syntax-enabled")
+                } else { 
+                    i18n::t("status-syntax-disabled")
+                };
                 if self.linter.is_enabled() {
                     self.run_linting();
                 }
@@ -251,8 +270,11 @@ impl InteractiveTextEditor {
             // Ctrl+E - Toggle linting
             (true, KeyCode::Char('e')) => {
                 self.linter.toggle();
-                let status = if self.linter.is_enabled() { "enabled" } else { "disabled" };
-                self.status_message = format!("Code linting {}", status);
+                self.status_message = if self.linter.is_enabled() { 
+                    i18n::t("status-linting-enabled")
+                } else { 
+                    i18n::t("status-linting-disabled")
+                };
                 if self.linter.is_enabled() {
                     self.run_linting();
                 } else {
@@ -264,31 +286,37 @@ impl InteractiveTextEditor {
             // Ctrl+N - New file
             (true, KeyCode::Char('n')) => {
                 if self.modified {
-                    self.status_message = "Save current file before creating new one (Ctrl+S)".to_string();
+                    self.status_message = i18n::t("file-save-before-new");
                 } else {
                     self.lines = vec!["".to_string()];
                     self.cursor.set_position(0, 0);
                     self.filename = None;
                     self.modified = false;
-                    self.status_message = "New file created".to_string();
+                    self.status_message = i18n::t("status-new-file-created");
                 }
             }
             
             // Ctrl+Home - Go to start of document
             (true, KeyCode::Home) => {
                 self.cursor.move_to_document_start();
-                self.status_message = "Start of document".to_string();
+                self.status_message = i18n::t("status-document-start");
             }
             
             // Ctrl+End - Go to end of document
             (true, KeyCode::End) => {
                 self.cursor.move_to_document_end(&self.lines);
-                self.status_message = "End of document".to_string();
+                self.status_message = i18n::t("status-document-end");
             }
             
             // Ctrl+L - Go to line
             (true, KeyCode::Char('l')) => {
-                self.status_message = "Go to line: (feature coming soon)".to_string();
+                self.status_message = i18n::t("status-goto-line-soon");
+            }
+            
+            // Ctrl+T - Toggle language
+            (true, KeyCode::Char('t')) => {
+                self.toggle_language();
+                self.mark_for_full_render(); // Language change affects all content
             }
             
             // Ctrl+D - Duplicate line
@@ -299,7 +327,7 @@ impl InteractiveTextEditor {
                     self.lines.insert(cursor_row + 1, line_to_duplicate);
                     self.cursor.set_position(cursor_row + 1, self.cursor.col());
                     self.modified = true;
-                    self.status_message = "Line duplicated".to_string();
+                    self.status_message = i18n::t("status-line-duplicated");
                 }
             }
             
@@ -315,12 +343,12 @@ impl InteractiveTextEditor {
                     };
                     self.cursor.set_position(new_row, 0);
                     self.modified = true;
-                    self.status_message = "Line deleted".to_string();
+                    self.status_message = i18n::t("status-line-deleted");
                 } else if self.lines.len() == 1 {
                     self.lines[0].clear();
                     self.cursor.set_position(cursor_row, 0);
                     self.modified = true;
-                    self.status_message = "Line cleared".to_string();
+                    self.status_message = i18n::t("status-line-cleared");
                 }
             }
 
@@ -402,13 +430,18 @@ impl InteractiveTextEditor {
             mouse::MouseAction::Click { row, col } => {
                 self.move_cursor_to_position(row, col);
                 self.text_selection = None;
-                self.status_message = format!("Cursor moved to row {}, col {}", row + 1, col + 1);
+                
+                let mut args = HashMap::new();
+                args.insert("row".to_string(), FluentValue::from(row + 1));
+                args.insert("col".to_string(), FluentValue::from(col + 1));
+                self.status_message = i18n::t_with_args("status-cursor-moved", args);
+                
                 self.mark_for_full_render(); // Click needs full render for cursor position
             }
             
             mouse::MouseAction::DoubleClick { row, col } => {
                 self.select_word_at_position(row, col);
-                self.status_message = "Word selected (double-click)".to_string();
+                self.status_message = i18n::t("status-word-selected");
                 self.mark_for_full_render(); // Selection needs full render
             }
             
@@ -418,7 +451,10 @@ impl InteractiveTextEditor {
                 if let Some(ref selection) = self.text_selection {
                     let selected_text = selection.get_selected_text(&self.lines);
                     let char_count = selected_text.chars().count();
-                    self.status_message = format!("Selected {} characters", char_count);
+                    
+                    let mut args = HashMap::new();
+                    args.insert("count".to_string(), FluentValue::from(char_count));
+                    self.status_message = i18n::t_with_args("status-text-selected", args);
                 }
                 self.mark_for_full_render(); // Selection end needs full render
             }
@@ -433,7 +469,7 @@ impl InteractiveTextEditor {
                 if self.scroll_offset > 0 {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                 }
-                self.status_message = "Scrolled up".to_string();
+                self.status_message = i18n::t("status-scrolled-up");
                 self.mark_for_full_render(); // Scroll needs full render for content change
             }
             
@@ -442,13 +478,13 @@ impl InteractiveTextEditor {
                 if self.scroll_offset < max_scroll {
                     self.scroll_offset = (self.scroll_offset + 3).min(max_scroll);
                 }
-                self.status_message = "Scrolled down".to_string();
+                self.status_message = i18n::t("status-scrolled-down");
                 self.mark_for_full_render(); // Scroll needs full render for content change
             }
             
             mouse::MouseAction::Drag { start_row: _, start_col: _, current_row, current_col } => {
                 self.move_cursor_to_position(current_row, current_col);
-                self.status_message = "Selecting text...".to_string();
+                self.status_message = i18n::t("status-selecting");
                 // Don't mark for full render during drag - use throttled rendering instead
             }
             
@@ -478,15 +514,19 @@ impl InteractiveTextEditor {
     fn show_context_menu(&mut self, row: usize, col: usize) {
         let actual_row = row + self.scroll_offset;
         
+        let mut args = HashMap::new();
+        args.insert("row".to_string(), FluentValue::from(actual_row + 1));
+        args.insert("col".to_string(), FluentValue::from(col + 1));
+        
         if let Some(ref selection) = self.text_selection {
             let selected_text = selection.get_selected_text(&self.lines);
             if !selected_text.is_empty() {
-                self.status_message = format!("Context menu: Copy/Cut/Paste available at row {}, col {}", actual_row + 1, col + 1);
+                self.status_message = i18n::t_with_args("context-menu-copy-cut-paste", args);
             } else {
-                self.status_message = format!("Context menu: Paste available at row {}, col {}", actual_row + 1, col + 1);
+                self.status_message = i18n::t_with_args("context-menu-paste", args);
             }
         } else {
-            self.status_message = format!("Context menu: Paste available at row {}, col {}", actual_row + 1, col + 1);
+            self.status_message = i18n::t_with_args("context-menu-paste", args);
         }
     }
 
@@ -624,7 +664,7 @@ impl InteractiveTextEditor {
 
     fn open_file_dialog(&mut self) {
         if self.modified {
-            self.status_message = "Save current file before opening new one (Ctrl+S)".to_string();
+            self.status_message = i18n::t("file-save-before-open");
             return;
         }
 
@@ -633,10 +673,10 @@ impl InteractiveTextEditor {
         
         // Show IOCraft file browser dialog with enhanced UI
         println!("┌─────────────────────────────────────────────────────────────┐");
-        println!("│ 📂 Open File - IOCraft File Browser                        │");
+        println!("│ {}                        │", i18n::t("dialog-open-file"));
         println!("├─────────────────────────────────────────────────────────────┤");
         println!("│                                                             │");
-        println!("│ 🎯 Navigate and select a file to open:                     │");
+        println!("│ {}                     │", i18n::t("dialog-navigate-select"));
         println!("│                                                             │");
         
         // Get current directory files
@@ -644,15 +684,15 @@ impl InteractiveTextEditor {
         if let Ok(_files) = self.iocraft_handler.display_file_browser(current_dir.to_str().unwrap_or(".")) {
             println!("│                                                             │");
             println!("├─────────────────────────────────────────────────────────────┤");
-            println!("│ 🚀 Quick Actions:                                          │");
+            println!("│ {}                                          │", i18n::t("dialog-quick-actions"));
             println!("│                                                             │");
-            println!("│  📝 [1] Type filename below                                │");
-            println!("│  📁 [2] Browse recent files                                │");
-            println!("│  🆕 [3] Create new file                                    │");
-            println!("│  ❌ [ESC] Cancel and return to editor                     │");
+            println!("│  {}                                │", i18n::t("dialog-action-type-filename"));
+            println!("│  {}                                │", i18n::t("dialog-action-browse-recent"));
+            println!("│  {}                                    │", i18n::t("dialog-action-create-new"));
+            println!("│  {}                     │", i18n::t("dialog-action-cancel"));
             println!("│                                                             │");
             println!("├─────────────────────────────────────────────────────────────┤");
-            print!("│ 📝 Enter filename or action [1-3]: ");
+            print!("│ {}: ", i18n::t("dialog-enter-filename"));
             stdout().flush().ok();
 
             // Read user input for filename or action
@@ -660,14 +700,14 @@ impl InteractiveTextEditor {
                 let input = input.trim();
                 
                 if input.is_empty() {
-                    self.status_message = "No input provided".to_string();
+                    self.status_message = i18n::t("file-no-input");
                     return;
                 }
                 
                 match input {
                     "1" => {
                         println!("│                                                             │");
-                        print!("│ 📝 Filename: ");
+                        print!("│ {}: ", i18n::t("dialog-filename-prompt"));
                         stdout().flush().ok();
                         
                         if let Some(filename) = self.read_filename_input() {
@@ -679,7 +719,7 @@ impl InteractiveTextEditor {
                     }
                     "3" => {
                         println!("│                                                             │");
-                        print!("│ 🆕 New filename: ");
+                        print!("│ {}: ", i18n::t("dialog-new-filename"));
                         stdout().flush().ok();
                         
                         if let Some(filename) = self.read_filename_input() {
@@ -695,10 +735,10 @@ impl InteractiveTextEditor {
                     }
                 }
             } else {
-                self.status_message = "Open canceled".to_string();
+                self.status_message = i18n::t("dialog-open-canceled");
             }
         } else {
-            self.status_message = "Error reading directory".to_string();
+            self.status_message = i18n::t("dialog-error-reading-directory");
         }
         
         println!("│                                                             │");
@@ -710,14 +750,16 @@ impl InteractiveTextEditor {
 
     fn process_file_open(&mut self, filename: &str) {
         if filename.is_empty() {
-            self.status_message = "No file specified".to_string();
+            self.status_message = i18n::t("file-no-file-specified");
             return;
         }
         
         // Attempt to load the file
         match self.load_file(filename) {
             Ok(()) => {
-                self.status_message = format!("✅ Opened: {}", filename);
+                let mut args = HashMap::new();
+                args.insert("filename".to_string(), FluentValue::from(filename));
+                self.status_message = i18n::t_with_args("file-opened-success", args);
             }
             Err(_) => {
                 // Offer to create new file if it doesn't exist
@@ -728,7 +770,7 @@ impl InteractiveTextEditor {
 
     fn show_recent_files_dialog(&mut self) {
         println!("│                                                             │");
-        println!("│ 📁 Recent Files:                                           │");
+        println!("│ {}:                                           │", i18n::t("dialog-recent-files"));
         
         // Show recent files (for now, we'll show some common file extensions in the directory)
         let recent_files: Vec<String> = vec![
@@ -742,7 +784,7 @@ impl InteractiveTextEditor {
         self.iocraft_handler.display_recent_files(&recent_files);
         
         println!("│                                                             │");
-        print!("│ 📝 Select file (or type name): ");
+        print!("│ {}: ", i18n::t("dialog-select-file"));
         stdout().flush().ok();
         
         if let Some(filename) = self.read_filename_input() {
@@ -755,7 +797,10 @@ impl InteractiveTextEditor {
         self.cursor.set_position(0, 0);
         self.filename = Some(filename.to_string());
         self.modified = true; // Mark as modified since it's new
-        self.status_message = format!("🆕 New file '{}' created - ready for editing!", filename);
+        
+        let mut args = HashMap::new();
+        args.insert("filename".to_string(), FluentValue::from(filename));
+        self.status_message = i18n::t_with_args("file-new-created", args);
     }
 
     fn read_filename_input(&mut self) -> Option<String> {
@@ -778,25 +823,70 @@ impl InteractiveTextEditor {
 
     fn offer_create_new_file(&mut self, filename: &str) {
         println!("│                                                             │");
-        println!("│ ⚠️  File '{}' not found.                     │", filename);
+        
+        let mut args = HashMap::new();
+        args.insert("filename".to_string(), FluentValue::from(filename));
+        println!("│ {}                     │", i18n::t_with_args("file-not-found", args));
+        
         println!("│                                                             │");
-        println!("│ 🆕 Would you like to create a new file? (y/n)              │");
-        print!("│ 📝 Your choice: ");
+        println!("│ {}              │", i18n::t("file-create-new"));
+        print!("│ {}: ", i18n::t("dialog-create-choice"));
         stdout().flush().ok();
 
         if let Some(response) = self.read_filename_input() {
-            if response.to_lowercase().starts_with('y') {
-                // Create new file
+            if response.to_lowercase().starts_with('y') || response.to_lowercase().starts_with('s') || response.to_lowercase().starts_with('j') {
+                // Create new file (yes in English, sí in Spanish, ja in German, oui in French)
                 self.lines = vec!["".to_string()];
                 self.cursor.set_position(0, 0);
                 self.filename = Some(filename.to_string());
                 self.modified = false;
-                self.status_message = format!("New file '{}' ready for editing", filename);
+                
+                let mut args = HashMap::new();
+                args.insert("filename".to_string(), FluentValue::from(filename));
+                self.status_message = i18n::t_with_args("file-new-ready", args);
             } else {
-                self.status_message = "File creation canceled".to_string();
+                self.status_message = i18n::t("file-creation-canceled");
             }
         } else {
-            self.status_message = "File creation canceled".to_string();
+            self.status_message = i18n::t("file-creation-canceled");
+        }
+    }
+
+    /// Cycles through available languages
+    fn toggle_language(&mut self) {
+        let (current_locale, supported_locales) = i18n::with_i18n(|manager| {
+            let supported = manager.get_supported_locales();
+            let current = manager.get_locale().to_string();
+            (current, supported.into_iter().cloned().collect::<Vec<_>>())
+        });
+        
+        // Find current locale index and switch to next
+        let current_index = supported_locales.iter().position(|locale| locale == &current_locale)
+            .unwrap_or(0);
+        
+        let next_index = (current_index + 1) % supported_locales.len();
+        let next_locale = &supported_locales[next_index];
+        
+        // Switch language
+        let result = i18n::with_i18n_mut(|manager| manager.set_locale(next_locale));
+        
+        match result {
+            Ok(()) => {
+                // Update status message using new language
+                let mut args = HashMap::new();
+                args.insert("language".to_string(), FluentValue::from(next_locale.as_str()));
+                self.status_message = i18n::t_with_args("lang-switch-success", args);
+                
+                // Update help status message
+                if self.status_message.contains("Ctrl+") || self.status_message.contains("Mouse:") {
+                    self.status_message = i18n::t("help-status-message");
+                }
+            }
+            Err(error) => {
+                let mut args = HashMap::new();
+                args.insert("error".to_string(), FluentValue::from(error));
+                self.status_message = i18n::t_with_args("lang-switch-error", args);
+            }
         }
     }
 
@@ -810,17 +900,19 @@ fn main() -> io::Result<()> {
         None
     };
 
-    println!("🎉 Starting IOCraft Interactive Text Editor...");
+    println!("{}", i18n::t("app-startup"));
     if let Some(ref name) = filename {
-        println!("📂 Opening file: {}", name);
+        let mut args = HashMap::new();
+        args.insert("filename".to_string(), FluentValue::from(name.as_str()));
+        println!("{}", i18n::t_with_args("file-opening", args));
     } else {
-        println!("📝 Creating new file...");
+        println!("{}", i18n::t("file-new"));
     }
-    println!("Press Ctrl+C to exit if needed\n");
+    println!("{}\n", i18n::t("exit-prompt"));
 
     let mut editor = InteractiveTextEditor::new(filename)?;
     editor.run()?;
 
-    println!("👋 Thanks for using IOCraft Text Editor!");
+    println!("{}", i18n::t("app-thanks"));
     Ok(())
 }
